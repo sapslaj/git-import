@@ -1,5 +1,5 @@
 require 'uri'
-require 'optsparse'
+require 'optparse'
 require 'git_import/version'
 
 module GitImport
@@ -13,18 +13,33 @@ module GitImport
     end
 
     def execute
-      print usage and abort if @source.nil?
+      print usage and abort if @source.nil? || @destination.nil?
 
-      command = "git clone --depth=1"
-      command << " --branch=#{@options[:branch]}" if @options[:branch]
+      command = ["git clone --depth=1"]
+      command << "--branch=#{@options[:branch]}" if @options[:branch]
       command << @source
       command << @destination
 
-      execute(command)
+      system(command.join(' '))
+
+      system("rm -rf #{@destination}/.git")
+
+      if @options[:initialize]
+        Dir.chdir(@destination)
+        system('git init .')
+        Dir.chdir('..')
+      end
     end
   private
     def usage(msg=nil)
-      [msg if msg, option_parser %w[--help]].join('\n')
+      [msg, option_parser.parse!(%w[--help])].join("\n")
+    end
+
+    def infer_name(url)
+      bit_match = url.match(/\A.*\/(.*)\z/)
+      print usage("Unknown repository name #{url}") and abort if bit_match.nil?
+      bit = bit_match[1]
+      bit.reverse.sub('.git'.reverse, '').reverse if bit.end_with? '.git'
     end
 
     def option_parser
@@ -41,6 +56,11 @@ module GitImport
 
         opts.on('-h', '--help', 'Print this help') do
           puts opts
+          abort
+        end
+
+        opts.on('-v', '--version', 'Print Version') do
+          puts "git-import #{VERSION}"
         end
       end
     end
@@ -50,6 +70,11 @@ module GitImport
 
       defaults = [nil, ARGV[-1]]
 
+      if ARGV.empty?
+        print usage
+        abort
+      end
+
       @destination, @source =
         if Dir.exist? ARGV[-1] # Probably has destination
           if ARGV[-2] =~ URI::regexp # Deffinitely has destination
@@ -58,11 +83,11 @@ module GitImport
             if Dir.exist? ARGV[-2] # Okay it's a local git repo
               [ARGV[-1], ARGV[-2]]
             else # fuck it
-              defaults
+              print usage and abort
             end
           end
         else # last bit is a git url
-          defaults
+          [infer_name(ARGV[-1]), ARGV[-1]]
         end
     end
   end
